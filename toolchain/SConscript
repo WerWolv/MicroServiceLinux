@@ -5,7 +5,7 @@ toolchain = project.crosstool_ng(
     name="toolchain",
     source="crosstool-ng",
     config="toolchain.config",
-    triplet="arm-ipc-linux-gnueabihf",
+    triplet="arm-wolv-linux-gnueabihf",
 )
 
 Return("toolchain")
