@@ -1,0 +1,22 @@
+from types import SimpleNamespace
+
+from SCons.Script import SConscript
+
+Import("project", "toolchain", "services")
+
+init = SConscript(
+    "init/SConscript",
+    exports={"project": project, "toolchain": toolchain},
+)
+
+app = SConscript(
+    "app/SConscript",
+    exports={"project": project, "toolchain": toolchain, "services": services},
+)
+
+applications = SimpleNamespace(
+    init=init,
+    app=app,
+)
+
+Return("applications")

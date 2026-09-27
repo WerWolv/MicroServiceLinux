@@ -1,0 +1,25 @@
+from types import SimpleNamespace
+
+Import("project", "toolchain", "shared")
+
+
+api = project.interface_library(
+    name="fs-api",
+    headers=["include/fs/fs.hpp"],
+    include_directories=["include"],
+    dependencies=[shared],
+)
+
+server = project.executable(
+    name="fs",
+    sources=["source/fs.cpp"],
+    compile_options=["-O2", "-pipe", "-Wall", "-Wextra"],
+    link_options=["-static", "-pthread"],
+    dependencies=[api],
+    toolchain=toolchain,
+    initramfs="/services/fs",
+)
+
+fs = SimpleNamespace(api=api, server=server)
+
+Return("fs")

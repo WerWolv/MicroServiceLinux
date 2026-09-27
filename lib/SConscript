@@ -1,0 +1,15 @@
+from types import SimpleNamespace
+
+from SCons.Script import SConscript
+
+Import("project")
+
+
+shared = SConscript(
+    "shared/SConscript",
+    exports={"project": project},
+)
+
+lib = SimpleNamespace(shared=shared)
+
+Return("lib")

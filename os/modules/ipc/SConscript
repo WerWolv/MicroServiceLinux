@@ -1,0 +1,18 @@
+Import("project", "toolchain", "linux")
+
+
+ipc_module = project.kernel_module(
+    name="ipc-module",
+    module_name="ipc",
+    source=".",
+    kernel=linux,
+    toolchain=toolchain,
+    inputs=[
+        "Makefile",
+        "source/ipc.c",
+        "include/ipc.h",
+    ],
+    initramfs="/modules/ipc.ko",
+)
+
+Return("ipc_module")

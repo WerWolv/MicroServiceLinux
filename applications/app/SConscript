@@ -1,0 +1,14 @@
+Import("project", "toolchain", "services")
+
+
+app = project.executable(
+    name="app",
+    sources=["source/main.cpp"],
+    toolchain=toolchain,
+    dependencies=[services.fs.api, services.log.api],
+    compile_options=["-std=c++26", "-O2", "-pipe", "-Wall", "-Wextra"],
+    link_options=["-static"],
+    initramfs="/app/app",
+)
+
+Return("app")

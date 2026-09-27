@@ -1,0 +1,16 @@
+from types import SimpleNamespace
+
+from SCons.Script import SConscript
+
+Import("project", "toolchain", "linux")
+
+ipc_module = SConscript(
+    "ipc/SConscript",
+    exports={"project": project, "toolchain": toolchain, "linux": linux},
+)
+
+kernel_modules = SimpleNamespace(
+    ipc_module=ipc_module,
+)
+
+Return("kernel_modules")

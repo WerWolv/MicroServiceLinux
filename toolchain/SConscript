@@ -1,0 +1,11 @@
+Import("project")
+
+
+toolchain = project.crosstool_ng(
+    name="toolchain",
+    source="crosstool-ng",
+    config="toolchain.config",
+    triplet="arm-ipc-linux-gnueabihf",
+)
+
+Return("toolchain")

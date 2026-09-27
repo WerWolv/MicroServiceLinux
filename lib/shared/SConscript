@@ -1,0 +1,19 @@
+Import("project")
+
+
+shared = project.interface_library(
+    name="shared",
+    headers=[
+        "include/wolv/ipc/ipc.hpp",
+        "include/wolv/ipc/ipc_serialization.hpp",
+        "include/wolv/ipc/serializers.hpp",
+        "../../os/modules/ipc/include/ipc.h",
+    ],
+    include_directories=[
+        "include",
+        "../../os/modules/ipc/include",
+    ],
+    compile_options=["-std=c++26", "-freflection"],
+)
+
+Return("shared")

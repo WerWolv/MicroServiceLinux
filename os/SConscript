@@ -1,0 +1,37 @@
+from types import SimpleNamespace
+
+from SCons.Script import SConscript
+
+Import("project", "toolchain")
+
+
+linux = project.linux_kernel(
+    name="linux",
+    source="linux",
+    config="linux.config",
+    architecture="arm",
+    device_tree="st/stm32mp157c-dk2",
+    toolchain=toolchain,
+)
+
+uboot = project.uboot(
+    name="u-boot",
+    source="u-boot",
+    configuration="stm32mp15_basic_defconfig",
+    architecture="arm",
+    device_tree="st/stm32mp157c-dk2",
+    toolchain=toolchain,
+)
+
+kernel_modules = SConscript(
+    "modules/SConscript",
+    exports={"project": project, "toolchain": toolchain, "linux": linux},
+)
+
+os = SimpleNamespace(
+    kernel=linux,
+    bootloader=uboot,
+    kernel_modules=kernel_modules,
+)
+
+Return("os")

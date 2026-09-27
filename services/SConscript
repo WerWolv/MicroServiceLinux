@@ -1,0 +1,28 @@
+from types import SimpleNamespace
+
+from SCons.Script import SConscript
+
+Import("project", "toolchain", "lib")
+
+
+fs = SConscript(
+    "fs/SConscript",
+    exports={
+        "project": project,
+        "toolchain": toolchain,
+        "shared": lib.shared,
+    },
+)
+
+log = SConscript(
+    "log/SConscript",
+    exports={
+        "project": project,
+        "toolchain": toolchain,
+        "shared": lib.shared,
+    },
+)
+
+services = SimpleNamespace(fs=fs, log=log)
+
+Return("services")
