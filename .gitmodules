@@ -1,0 +1,9 @@
+[submodule "os/u-boot"]
+	path = os/u-boot
+	url = https://github.com/u-boot/u-boot
+[submodule "toolchain/crosstool-ng"]
+	path = toolchain/crosstool-ng
+	url = https://github.com/crosstool-ng/crosstool-ng
+[submodule "os/linux"]
+	path = os/linux
+	url = https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
