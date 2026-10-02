@@ -23,6 +23,36 @@ log = SConscript(
     },
 )
 
-services = SimpleNamespace(fs=fs, log=log)
+gpio = SConscript(
+    "gpio/SConscript",
+    exports={
+        "project": project,
+        "toolchain": toolchain,
+        "shared": lib.shared,
+    },
+)
+
+spi = SConscript(
+    "spi/SConscript",
+    exports={
+        "project": project,
+        "toolchain": toolchain,
+        "shared": lib.shared,
+    },
+)
+
+display = SConscript(
+    "display/SConscript",
+    exports={
+        "project": project,
+        "toolchain": toolchain,
+        "shared": lib.shared,
+        "logging": log.api,
+        "gpio": gpio.api,
+        "spi": spi.api,
+    },
+)
+
+services = SimpleNamespace(fs=fs, log=log, gpio=gpio, spi=spi, display=display)
 
 Return("services")

@@ -18,6 +18,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 namespace ipc {
 
@@ -75,6 +76,13 @@ namespace ipc {
         [[nodiscard]] std::uint32_t prot() const { return protection; }
         [[nodiscard]] std::uint64_t offset() const { return regionOffset; }
         [[nodiscard]] std::uint64_t size() const { return regionSize; }
+        [[nodiscard]] std::span<std::byte> map() const {
+            void *mapping = mmap(nullptr, regionSize, protection, MAP_SHARED,
+                                 descriptor.get(), regionOffset);
+            if (mapping == MAP_FAILED)
+                throw std::system_error(errno, std::generic_category(), "map IPC memory region");
+            return std::span(static_cast<std::byte *>(mapping), regionSize);
+        }
 
     private:
         FileDescriptor descriptor;

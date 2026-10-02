@@ -1,0 +1,25 @@
+from types import SimpleNamespace
+
+Import("project", "toolchain", "shared", "logging", "gpio", "spi")
+
+
+api = project.interface_library(
+    name="display-api",
+    headers=["include/display/display.hpp"],
+    include_directories=["include"],
+    dependencies=[shared],
+)
+
+server = project.executable(
+    name="display",
+    sources=["source/display.cpp"],
+    compile_options=["-std=c++26", "-O2", "-pipe", "-Wall", "-Wextra"],
+    link_options=["-pthread"],
+    dependencies=[api, logging, gpio, spi],
+    toolchain=toolchain,
+    initramfs="/services/display",
+)
+
+display = SimpleNamespace(api=api, server=server)
+
+Return("display")

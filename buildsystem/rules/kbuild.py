@@ -1,10 +1,43 @@
+import os
 import shutil
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from SCons.Script import Action, AlwaysBuild
 
 from ..model import Bootloader, InitramfsFile, KBuildCompilationDatabase, Kernel
 from ..process import process_environment, run
+
+
+def reproducible_environment(environment, source_directory):
+    result = dict(environment.get("ENV", {}))
+    epoch = result.get("SOURCE_DATE_EPOCH") or os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch is None:
+        completed = subprocess.run(
+            ["git", "-C", str(source_directory), "log", "-1", "--format=%ct"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0 or not completed.stdout.strip():
+            raise RuntimeError(
+                f"could not determine source timestamp for {source_directory}"
+            )
+        epoch = completed.stdout.strip()
+
+    try:
+        timestamp = datetime.fromtimestamp(int(epoch), timezone.utc)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(f"invalid SOURCE_DATE_EPOCH: {epoch!r}") from error
+
+    result["SOURCE_DATE_EPOCH"] = str(epoch)
+    result.setdefault("KBUILD_BUILD_VERSION", "1")
+    result.setdefault(
+        "KBUILD_BUILD_TIMESTAMP",
+        timestamp.strftime("%Y-%m-%d %H:%M:%S +0000"),
+    )
+    return result
 
 
 def make_command(environment, targets, *, extra_variables=(), parallel=False):
@@ -22,16 +55,54 @@ def make_command(environment, targets, *, extra_variables=(), parallel=False):
 def configure_linux(target, source, env):
     build_directory = Path(env["KBUILD_OUTPUT"])
     build_directory.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(env["KCONFIG_FILE"], build_directory / ".config")
+    if env["KCONFIG_BASE"]:
+        result = run(
+            make_command(env, [env["KCONFIG_BASE"]]),
+            env=process_environment(env),
+        )
+        if result:
+            return result
+        result = run(
+            [
+                str(Path(env["KBUILD_SOURCE"]) / "scripts/kconfig/merge_config.sh"),
+                "-m",
+                "-O",
+                str(build_directory),
+                str(build_directory / ".config"),
+                env["KCONFIG_FILE"],
+            ],
+            env=process_environment(env),
+        )
+        if result:
+            return result
+    else:
+        shutil.copy2(env["KCONFIG_FILE"], build_directory / ".config")
     return run(make_command(env, ["olddefconfig"]), env=process_environment(env))
 
 
 def configure_uboot(target, source, env):
-    Path(env["KBUILD_OUTPUT"]).mkdir(parents=True, exist_ok=True)
-    return run(
-        make_command(env, [env["KCONFIG_TARGET"]]),
+    build_directory = Path(env["KBUILD_OUTPUT"])
+    build_directory.mkdir(parents=True, exist_ok=True)
+    result = run(
+        make_command(env, [env["KCONFIG_BASE"]]),
         env=process_environment(env),
     )
+    if result:
+        return result
+    result = run(
+        [
+            str(Path(env["KBUILD_SOURCE"]) / "scripts/kconfig/merge_config.sh"),
+            "-m",
+            "-O",
+            str(build_directory),
+            str(build_directory / ".config"),
+            env["KCONFIG_FILE"],
+        ],
+        env=process_environment(env),
+    )
+    if result:
+        return result
+    return run(make_command(env, ["olddefconfig"]), env=process_environment(env))
 
 
 def run_kbuild(target, source, env):
@@ -40,6 +111,57 @@ def run_kbuild(target, source, env):
         make_command(env, env["KBUILD_TARGETS"], parallel=True),
         env=process_environment(env),
     )
+
+
+def build_device_tree(target, source, env):
+    output = Path(target[0].abspath)
+    preprocessed = output.with_suffix(".dts.tmp")
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        result = run(
+            [
+                env["HOST_CC"],
+                "-E",
+                "-nostdinc",
+                "-I",
+                env["DTC_INCLUDE"],
+                "-undef",
+                "-D__DTS__",
+                "-x",
+                "assembler-with-cpp",
+                "-o",
+                str(preprocessed),
+                env["DEVICE_TREE_SOURCE"],
+            ],
+            env=process_environment(env),
+        )
+        if result != 0:
+            return result
+
+        return run(
+            [
+                env["DTC"],
+                "-o",
+                str(output),
+                "-b",
+                "0",
+                "-i",
+                str(Path(env["DEVICE_TREE_SOURCE"]).parent),
+                "-i",
+                env["DTC_INCLUDE"],
+                "-Wno-unique_unit_address",
+                "-Wno-unit_address_vs_reg",
+                "-Wno-avoid_unnecessary_addr_size",
+                "-Wno-alias_paths",
+                "-Wno-interrupt_map",
+                "-Wno-simple_bus_reg",
+                str(preprocessed),
+            ],
+            env=process_environment(env),
+        )
+    finally:
+        preprocessed.unlink(missing_ok=True)
 
 
 def run_kernel_module(target, source, env):
@@ -56,15 +178,19 @@ def run_kernel_module(target, source, env):
 
 
 def describe_linux_configuration(target, source, env):
-    return "KCONFIG Linux for STM32MP157-DK2"
+    return f"KCONFIG {env['KBUILD_DESCRIPTION']}"
 
 
 def describe_uboot_configuration(target, source, env):
-    return "KCONFIG U-Boot for STM32MP157-DK2"
+    return f"KCONFIG {env['KBUILD_DESCRIPTION']}"
 
 
 def describe_kbuild(target, source, env):
     return f"KBUILD  {env['KBUILD_DESCRIPTION']}"
+
+
+def describe_device_tree(target, source, env):
+    return f"DTC     {Path(env['DEVICE_TREE_SOURCE']).name}"
 
 
 def describe_module(target, source, env):
@@ -78,7 +204,11 @@ class KBuildRules:
         name,
         source,
         config,
+        base_configuration,
         architecture,
+        image_target,
+        image_path,
+        description,
         device_tree,
         toolchain,
     ):
@@ -86,43 +216,68 @@ class KBuildRules:
         build_directory = self.output("linux")
         config_node = self.environment.File(str(build_directory / ".config"))
         variables = [f"ARCH={architecture}", f"CROSS_COMPILE={toolchain.cross_compile}"]
+        environment_variables = reproducible_environment(
+            self.environment, source_directory
+        )
         configure_environment = self.environment.Clone(
+            ENV=environment_variables,
             KBUILD_SOURCE=str(source_directory),
             KBUILD_OUTPUT=str(build_directory),
             KBUILD_VARIABLES=variables,
             KCONFIG_FILE=str(self.source(config)),
+            KCONFIG_BASE=base_configuration or "",
+            KBUILD_DESCRIPTION=description,
         )
+        configuration_sources = [
+            self.environment.File(str(self.source(config))),
+            self.environment.File(str(source_directory / "Kconfig")),
+            *toolchain.outputs,
+        ]
+        if base_configuration:
+            configuration_sources.append(
+                self.environment.File(
+                    str(
+                        source_directory
+                        / "arch"
+                        / architecture
+                        / "configs"
+                        / base_configuration
+                    )
+                )
+            )
         configured = configure_environment.Command(
             config_node,
-            [
-                self.environment.File(str(self.source(config))),
-                self.environment.File(str(source_directory / "Kconfig")),
-                *toolchain.outputs,
-            ],
+            configuration_sources,
             Action(
                 configure_linux,
                 describe_linux_configuration,
-                varlist=["KBUILD_SOURCE", "KBUILD_OUTPUT", "KBUILD_VARIABLES", "KCONFIG_FILE"],
+                varlist=[
+                    "KBUILD_SOURCE",
+                    "KBUILD_OUTPUT",
+                    "KBUILD_VARIABLES",
+                    "KCONFIG_FILE",
+                    "KCONFIG_BASE",
+                    "KBUILD_DESCRIPTION",
+                ],
             ),
         )
 
         outputs = (
-            self.environment.File(str(build_directory / "arch/arm/boot/zImage")),
-            self.environment.File(str(build_directory / f"arch/arm/boot/dts/{device_tree}.dtb")),
+            self.environment.File(str(build_directory / image_path)),
             self.environment.File(str(build_directory / "Module.symvers")),
             self.environment.File(str(build_directory / "usr/gen_init_cpio")),
+            self.environment.File(str(build_directory / "scripts/dtc/dtc")),
         )
         build_environment = self.environment.Clone(
+            ENV=environment_variables,
             KBUILD_SOURCE=str(source_directory),
             KBUILD_OUTPUT=str(build_directory),
             KBUILD_VARIABLES=variables,
             KBUILD_TARGETS=[
-                "zImage",
-                f"{device_tree}.dtb",
+                image_target,
                 "modules",
-                "usr_gen_init_cpio",
             ],
-            KBUILD_DESCRIPTION="Linux for STM32MP157-DK2",
+            KBUILD_DESCRIPTION=description,
             BUILD_JOBS=self.jobs,
         )
         built = build_environment.Command(
@@ -140,14 +295,37 @@ class KBuildRules:
                 ],
             ),
         )
+        build_environment.Precious(built)
         AlwaysBuild(built)
         build_environment.SideEffect(self.kbuild_lock, built)
+
+        device_tree_source = self.environment.File(str(self.source(device_tree)))
+        device_tree_output = self.environment.File(
+            str(self.output(f"devicetrees/{Path(device_tree).stem}.dtb"))
+        )
+        device_tree_environment = self.environment.Clone(
+            DEVICE_TREE_SOURCE=device_tree_source.abspath,
+            DTC=outputs[3].abspath,
+            DTC_INCLUDE=str(source_directory / "scripts/dtc/include-prefixes"),
+            HOST_CC="gcc",
+        )
+        device_tree_built = device_tree_environment.Command(
+            device_tree_output,
+            [device_tree_source, *built],
+            Action(
+                build_device_tree,
+                describe_device_tree,
+                varlist=["DEVICE_TREE_SOURCE", "DTC", "DTC_INCLUDE", "HOST_CC"],
+            ),
+        )
+        AlwaysBuild(device_tree_built)
+
         compilation_generator = self.environment.File(
             str(source_directory / "scripts/clang-tools/gen_compile_commands.py")
         )
         target = self._register(
             name,
-            built,
+            (*built, *device_tree_built),
             kbuild_compilation_databases=(
                 KBuildCompilationDatabase(
                     compilation_generator,
@@ -160,10 +338,11 @@ class KBuildRules:
             target=target,
             source_directory=source_directory,
             build_directory=build_directory,
+            architecture=architecture,
             image=outputs[0],
-            device_tree=outputs[1],
-            module_symbols=outputs[2],
-            gen_init_cpio=outputs[3],
+            device_tree=device_tree_built[0],
+            module_symbols=outputs[1],
+            gen_init_cpio=outputs[2],
         )
 
     def uboot(
@@ -171,9 +350,12 @@ class KBuildRules:
         *,
         name,
         source,
-        configuration,
+        config,
+        base_configuration,
         architecture,
         device_tree,
+        outputs,
+        description,
         toolchain,
     ):
         source_directory = self.source(source)
@@ -184,40 +366,57 @@ class KBuildRules:
             f"DEVICE_TREE={device_tree}",
             f"CROSS_COMPILE={toolchain.cross_compile}",
         ]
+        environment_variables = reproducible_environment(
+            self.environment, source_directory
+        )
         configure_environment = self.environment.Clone(
+            ENV=environment_variables,
             KBUILD_SOURCE=str(source_directory),
             KBUILD_OUTPUT=str(build_directory),
             KBUILD_VARIABLES=variables,
-            KCONFIG_TARGET=configuration,
+            KCONFIG_FILE=str(self.source(config)),
+            KCONFIG_BASE=base_configuration,
+            KBUILD_DESCRIPTION=description,
         )
         configured = configure_environment.Command(
             config_node,
             [
                 self.environment.File(str(source_directory / "Kconfig")),
-                self.environment.File(str(source_directory / "configs" / configuration)),
+                self.environment.File(
+                    str(source_directory / "configs" / base_configuration)
+                ),
+                self.environment.File(str(self.source(config))),
                 *toolchain.outputs,
             ],
             Action(
                 configure_uboot,
                 describe_uboot_configuration,
-                varlist=["KBUILD_SOURCE", "KBUILD_OUTPUT", "KBUILD_VARIABLES", "KCONFIG_TARGET"],
+                varlist=[
+                    "KBUILD_SOURCE",
+                    "KBUILD_OUTPUT",
+                    "KBUILD_VARIABLES",
+                    "KCONFIG_FILE",
+                    "KCONFIG_BASE",
+                    "KBUILD_DESCRIPTION",
+                ],
             ),
         )
 
-        outputs = (
-            self.environment.File(str(build_directory / "u-boot-spl.stm32")),
-            self.environment.File(str(build_directory / "u-boot.img")),
+        output_nodes = tuple(
+            self.environment.File(str(build_directory / output))
+            for output in outputs
         )
         build_environment = self.environment.Clone(
+            ENV=environment_variables,
             KBUILD_SOURCE=str(source_directory),
             KBUILD_OUTPUT=str(build_directory),
             KBUILD_VARIABLES=variables,
             KBUILD_TARGETS=[],
-            KBUILD_DESCRIPTION="U-Boot for STM32MP157-DK2",
+            KBUILD_DESCRIPTION=description,
             BUILD_JOBS=self.jobs,
         )
         built = build_environment.Command(
-            outputs,
+            output_nodes,
             [configured, *toolchain.outputs],
             Action(
                 run_kbuild,
@@ -231,6 +430,7 @@ class KBuildRules:
                 ],
             ),
         )
+        build_environment.Precious(built)
         AlwaysBuild(built)
         build_environment.SideEffect(self.kbuild_lock, built)
         compilation_generator = self.environment.File(
@@ -247,7 +447,7 @@ class KBuildRules:
                 ),
             ),
         )
-        return Bootloader(target=target, spl=outputs[0], image=outputs[1])
+        return Bootloader(target=target, outputs=tuple(built))
 
     def kernel_module(
         self,
@@ -264,9 +464,15 @@ class KBuildRules:
         output_directory = self.output(f"modules/{module_name}")
         output = self.environment.File(str(output_directory / f"{module_name}.ko"))
         environment = self.environment.Clone(
+            ENV=reproducible_environment(
+                self.environment, kernel.source_directory
+            ),
             KBUILD_SOURCE=str(kernel.source_directory),
             KBUILD_OUTPUT=str(kernel.build_directory),
-            KBUILD_VARIABLES=["ARCH=arm", f"CROSS_COMPILE={toolchain.cross_compile}"],
+            KBUILD_VARIABLES=[
+                f"ARCH={kernel.architecture}",
+                f"CROSS_COMPILE={toolchain.cross_compile}",
+            ],
             MODULE_SOURCE=str(source_directory),
             MODULE_OUTPUT=str(output_directory),
             MODULE_NAME=module_name,
@@ -289,6 +495,7 @@ class KBuildRules:
                 ],
             ),
         )
+        environment.Precious(built)
         AlwaysBuild(built)
         environment.SideEffect(self.kbuild_lock, built)
         initramfs_files = ()

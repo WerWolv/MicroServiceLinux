@@ -1,0 +1,65 @@
+from pathlib import Path
+
+from SCons.Script import Dir
+
+Import("project", "os", "initramfs")
+
+
+directory = Path(Dir(".").abspath)
+
+boot_filesystem = project.action(
+    name="boot-filesystem",
+    outputs=["bootfs.ext4"],
+    inputs=[
+        directory / "create-bootfs.sh",
+        directory / "extlinux.conf",
+        initramfs.nodes[1],
+        os.kernel.image,
+        os.kernel.device_tree,
+    ],
+    command=[
+        "fakeroot",
+        "sh",
+        directory / "create-bootfs.sh",
+        project.output("bootfs"),
+        project.output("bootfs.ext4"),
+        initramfs.nodes[1],
+        os.kernel.image,
+        os.kernel.device_tree,
+        directory / "extlinux.conf",
+    ],
+)
+
+images = project.action(
+    name="images",
+    outputs=[
+        "images/u-boot-spl.stm32",
+        "images/u-boot.img",
+        "images/bootfs.ext4",
+        "images/initramfs.cpio.gz",
+        "images/zImage",
+        "images/stm32mp157c-dk2.dtb",
+        "images/sdcard.img",
+    ],
+    inputs=[
+        directory / "create-sdcard.sh",
+        *os.bootloader.outputs,
+        boot_filesystem.nodes[0],
+        initramfs.nodes[1],
+        os.kernel.image,
+        os.kernel.device_tree,
+    ],
+    command=[
+        "sh",
+        directory / "create-sdcard.sh",
+        project.output("images"),
+        os.bootloader.outputs[0],
+        os.bootloader.outputs[1],
+        boot_filesystem.nodes[0],
+        initramfs.nodes[1],
+        os.kernel.image,
+        os.kernel.device_tree,
+    ],
+)
+
+Return("images")

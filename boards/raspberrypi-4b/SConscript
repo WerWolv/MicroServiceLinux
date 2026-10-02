@@ -1,0 +1,44 @@
+from pathlib import Path
+
+from SCons.Script import Dir
+
+from buildsystem import (
+    Board,
+    LinuxConfiguration,
+    ToolchainConfiguration,
+    UBootConfiguration,
+)
+
+
+directory = Path(Dir(".").abspath)
+root = Path(Dir("#").abspath)
+
+board = Board(
+    name="raspberrypi-4b",
+    toolchain=ToolchainConfiguration(
+        config=root / "toolchain/toolchain.config",
+        triplet="arm-wolv-linux-gnueabihf",
+        description="ARMv7 hard-float toolchain",
+        build_name="output",
+    ),
+    linux=LinuxConfiguration(
+        config=directory / "linux.config",
+        base_configuration="multi_v7_defconfig",
+        architecture="arm",
+        image_target="zImage",
+        image_path=Path("arch/arm/boot/zImage"),
+        description="Linux for Raspberry Pi 4 Model B",
+        device_tree=directory / "bcm2711-rpi-4-b.dts",
+    ),
+    uboot=UBootConfiguration(
+        config=directory / "u-boot.config",
+        base_configuration="rpi_4_32b_defconfig",
+        architecture="arm",
+        device_tree="bcm2711-rpi-4-b",
+        outputs=(Path("u-boot.bin"),),
+        description="U-Boot for Raspberry Pi 4 Model B",
+    ),
+    image_sconscript=directory / "image/SConscript",
+)
+
+Return("board")

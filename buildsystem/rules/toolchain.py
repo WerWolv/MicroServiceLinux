@@ -10,12 +10,10 @@ def build_crosstool_ng_host(target, source, env):
     source_directory = Path(env["CTNG_SOURCE"])
     build_directory = Path(env["CTNG_HOST_BUILD"])
     prefix = Path(env["CTNG_HOST_PREFIX"])
+    result = run(["./bootstrap"], cwd=source_directory)
+    if result:
+        return result
     configure = source_directory / "configure"
-
-    if not configure.is_file():
-        result = run(["./bootstrap"], cwd=source_directory)
-        if result:
-            return result
 
     build_directory.mkdir(parents=True, exist_ok=True)
     result = run(
@@ -74,14 +72,15 @@ def describe_toolchain_host(target, source, env):
 
 
 def describe_cross_toolchain(target, source, env):
-    return "BUILD   STM32MP157 ARM toolchain"
+    return f"BUILD   {env['CT_DESCRIPTION']}"
 
 
 class ToolchainRules:
-    def crosstool_ng(self, *, name, source, config, triplet):
+    def crosstool_ng(self, *, name, source, config, triplet, description, build_name):
         source_directory = self.source(source)
         configuration = self.source(config)
-        work = self.output("crosstool-ng")
+        shared_output = self.build_directory.parent / build_name
+        work = shared_output / "crosstool-ng"
         host_build = work / "host-build"
         host_prefix = work / "host"
         ct_ng = self.environment.File(str(host_prefix / "bin/ct-ng"))
@@ -107,7 +106,7 @@ class ToolchainRules:
         )
         host_environment.NoClean(host)
 
-        prefix = self.output("toolchain")
+        prefix = shared_output / "toolchain"
         binary_prefix = prefix / "bin" / f"{triplet}-"
         compiler_outputs = tuple(
             self.environment.File(str(binary_prefix) + suffix)
@@ -117,10 +116,11 @@ class ToolchainRules:
         cross_environment = self.environment.Clone(
             CT_BUILD=str(work / "toolchain-build"),
             CT_PREFIX=str(prefix),
-            CT_DOWNLOADS=str(self.output("downloads")),
+            CT_DOWNLOADS=str(shared_output / "downloads"),
             CT_CONFIG=str(configuration),
             CT_NG=ct_ng.abspath,
             CT_TOOLS=[tool.abspath for tool in compiler_outputs],
+            CT_DESCRIPTION=description,
         )
         built = cross_environment.Command(
             toolchain_stamp,
@@ -135,6 +135,7 @@ class ToolchainRules:
                     "CT_CONFIG",
                     "CT_NG",
                     "CT_TOOLS",
+                    "CT_DESCRIPTION",
                 ],
             ),
         )
@@ -148,4 +149,5 @@ class ToolchainRules:
             ranlib=compiler_outputs[3],
             stripper=compiler_outputs[4],
             cross_compile=str(binary_prefix),
+            sysroot=prefix / triplet / "sysroot",
         )

@@ -1,5 +1,5 @@
-#ifndef HORIZON_IPC_H
-#define HORIZON_IPC_H
+#ifndef IPC_H
+#define IPC_H
 
 #include <linux/ioctl.h>
 #include <linux/types.h>

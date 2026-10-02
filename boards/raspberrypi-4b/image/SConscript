@@ -1,0 +1,54 @@
+from pathlib import Path
+
+from SCons.Script import Dir
+
+Import("project", "os", "initramfs")
+
+
+directory = Path(Dir(".").abspath)
+firmware = directory.parent / "firmware"
+
+images = project.action(
+    name="images",
+    outputs=[
+        "images/u-boot.bin",
+        "images/initramfs.cpio.gz",
+        "images/zImage",
+        "images/bcm2711-rpi-4-b.dtb",
+        "images/config.txt",
+        "images/extlinux.conf",
+        "images/start4.elf",
+        "images/fixup4.dat",
+        "images/LICENCE.broadcom",
+        "images/bootfs.fat",
+        "images/sdcard.img",
+    ],
+    inputs=[
+        directory / "create-sdcard.sh",
+        directory / "config.txt",
+        directory / "extlinux.conf",
+        firmware / "start4.elf",
+        firmware / "fixup4.dat",
+        firmware / "LICENCE.broadcom",
+        *os.bootloader.outputs,
+        initramfs.nodes[1],
+        os.kernel.image,
+        os.kernel.device_tree,
+    ],
+    command=[
+        "sh",
+        directory / "create-sdcard.sh",
+        project.output("images"),
+        os.bootloader.outputs[0],
+        initramfs.nodes[1],
+        os.kernel.image,
+        os.kernel.device_tree,
+        directory / "config.txt",
+        directory / "extlinux.conf",
+        firmware / "start4.elf",
+        firmware / "fixup4.dat",
+        firmware / "LICENCE.broadcom",
+    ],
+)
+
+Return("images")

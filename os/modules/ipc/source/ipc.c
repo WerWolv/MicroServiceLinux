@@ -318,7 +318,7 @@ static long ipc_create_service(unsigned long arg)
 	if (!service)
 		return -ENOMEM;
 
-	server_file = anon_inode_getfile("[horizon-ipc-server]",
+	server_file = anon_inode_getfile("[ipc-server]",
 			&ipc_server_file_operations, service, O_RDWR);
 	if (IS_ERR(server_file)) {
 		ipc_service_put(service);
@@ -326,7 +326,7 @@ static long ipc_create_service(unsigned long arg)
 	}
 
 	kref_get(&service->ref);
-	client_file = anon_inode_getfile("[horizon-ipc-client]",
+	client_file = anon_inode_getfile("[ipc-client]",
 			&ipc_client_file_operations, service, O_RDWR);
 	if (IS_ERR(client_file)) {
 		ipc_service_put(service);
@@ -389,7 +389,7 @@ static long ipc_get_service(unsigned long arg)
 			return ret;
 	}
 
-	service_file = anon_inode_getfile("[horizon-ipc-service]",
+	service_file = anon_inode_getfile("[ipc-service]",
 			&ipc_client_file_operations, service, O_RDWR);
 	if (IS_ERR(service_file)) {
 		ipc_service_put(service);

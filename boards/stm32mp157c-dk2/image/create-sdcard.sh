@@ -9,15 +9,17 @@ initramfs=$5
 kernel=$6
 device_tree=$7
 
+rm -rf "$output_dir"
 mkdir -p "$output_dir"
 install -m 0644 "$spl" "$output_dir/u-boot-spl.stm32"
 install -m 0644 "$u_boot" "$output_dir/u-boot.img"
 install -m 0644 "$bootfs" "$output_dir/bootfs.ext4"
-install -m 0644 "$initramfs" "$output_dir/initramfs.cpio"
+install -m 0644 "$initramfs" "$output_dir/initramfs.cpio.gz"
 install -m 0644 "$kernel" "$output_dir/zImage"
 install -m 0644 "$device_tree" "$output_dir/stm32mp157c-dk2.dtb"
 
-bootfs_sectors=$((128 * 1024 * 1024 / 512))
+bootfs_bytes=$(stat -c %s "$bootfs")
+bootfs_sectors=$(( (bootfs_bytes + 511) / 512 ))
 image_sectors=$((5154 + bootfs_sectors + 33))
 image="$output_dir/sdcard.img"
 rm -f "$image"

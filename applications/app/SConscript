@@ -5,9 +5,8 @@ app = project.executable(
     name="app",
     sources=["source/main.cpp"],
     toolchain=toolchain,
-    dependencies=[services.fs.api, services.log.api],
+    dependencies=[services.fs.api, services.log.api, services.display.api],
     compile_options=["-std=c++26", "-O2", "-pipe", "-Wall", "-Wextra"],
-    link_options=["-static"],
     initramfs="/app/app",
 )
 

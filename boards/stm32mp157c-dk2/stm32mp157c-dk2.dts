@@ -1,0 +1,57 @@
+#include <arm/st/stm32mp157c-dk2.dts>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		epaper0 = &epaper;
+	};
+
+	sound {
+		status = "disabled";
+	};
+};
+
+&gpiof {
+	gpio-line-names = "epaper-busy", "", "", "", "epaper-dc", "",
+			  "epaper-cs", "", "", "", "", "", "", "", "", "";
+};
+
+&gpiog {
+	gpio-line-names = "", "", "", "", "", "", "", "",
+			  "epaper-reset", "", "", "", "", "", "", "";
+};
+
+&gpioi {
+	gpio-line-names = "", "", "", "", "", "epaper-power", "", "",
+			  "", "", "", "", "", "", "", "";
+};
+
+&cs42l51 {
+	status = "disabled";
+};
+
+&sai2 {
+	status = "disabled";
+};
+
+&spi5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi5_pins_a>;
+	cs-gpios = <&gpiof 6 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	epaper: display@0 {
+		compatible = "waveshare,4in0e";
+		reg = <0>;
+		spi-max-frequency = <4000000>;
+	};
+};
+
+&i2c1 {
+	hat_eeprom: eeprom@50 {
+		compatible = "atmel,24c32";
+		reg = <0x50>;
+		pagesize = <32>;
+		read-only;
+	};
+};

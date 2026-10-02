@@ -48,6 +48,7 @@ class Toolchain:
     ranlib: Any
     stripper: Any
     cross_compile: str
+    sysroot: Path
 
     @property
     def outputs(self) -> tuple[Any, ...]:
@@ -55,10 +56,49 @@ class Toolchain:
 
 
 @dataclass(frozen=True)
+class ToolchainConfiguration:
+    config: Path
+    triplet: str
+    description: str
+    build_name: str
+
+
+@dataclass(frozen=True)
+class LinuxConfiguration:
+    config: Path
+    architecture: str
+    image_target: str
+    image_path: Path
+    description: str
+    device_tree: Path
+    base_configuration: str | None = None
+
+
+@dataclass(frozen=True)
+class UBootConfiguration:
+    config: Path
+    base_configuration: str
+    architecture: str
+    device_tree: str
+    outputs: tuple[Path, ...]
+    description: str
+
+
+@dataclass(frozen=True)
+class Board:
+    name: str
+    toolchain: ToolchainConfiguration
+    linux: LinuxConfiguration
+    uboot: UBootConfiguration
+    image_sconscript: Path
+
+
+@dataclass(frozen=True)
 class Kernel:
     target: Target
     source_directory: Path
     build_directory: Path
+    architecture: str
     image: Any
     device_tree: Any
     module_symbols: Any
@@ -68,8 +108,7 @@ class Kernel:
 @dataclass(frozen=True)
 class Bootloader:
     target: Target
-    spl: Any
-    image: Any
+    outputs: tuple[Any, ...]
 
 
 def unique(values):

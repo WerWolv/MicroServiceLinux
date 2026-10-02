@@ -1,0 +1,43 @@
+from pathlib import Path
+
+from SCons.Script import Dir
+
+from buildsystem import (
+    Board,
+    LinuxConfiguration,
+    ToolchainConfiguration,
+    UBootConfiguration,
+)
+
+
+directory = Path(Dir(".").abspath)
+root = Path(Dir("#").abspath)
+
+board = Board(
+    name="stm32mp157c-dk2",
+    toolchain=ToolchainConfiguration(
+        config=root / "toolchain/toolchain.config",
+        triplet="arm-wolv-linux-gnueabihf",
+        description="ARMv7 hard-float toolchain",
+        build_name="output",
+    ),
+    linux=LinuxConfiguration(
+        config=directory / "linux.config",
+        architecture="arm",
+        image_target="zImage",
+        image_path=Path("arch/arm/boot/zImage"),
+        description="Linux for STM32MP157-DK2",
+        device_tree=directory / "stm32mp157c-dk2.dts",
+    ),
+    uboot=UBootConfiguration(
+        config=directory / "u-boot.config",
+        base_configuration="stm32mp15_basic_defconfig",
+        architecture="arm",
+        device_tree="st/stm32mp157c-dk2",
+        outputs=(Path("u-boot-spl.stm32"), Path("u-boot.img")),
+        description="U-Boot for STM32MP157-DK2",
+    ),
+    image_sconscript=directory / "image/SConscript",
+)
+
+Return("board")

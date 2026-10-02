@@ -2,24 +2,31 @@ from types import SimpleNamespace
 
 from SCons.Script import SConscript
 
-Import("project", "toolchain")
+Import("project", "toolchain", "board")
 
 
 linux = project.linux_kernel(
     name="linux",
     source="linux",
-    config="linux.config",
-    architecture="arm",
-    device_tree="st/stm32mp157c-dk2",
+    config=board.linux.config,
+    base_configuration=board.linux.base_configuration,
+    architecture=board.linux.architecture,
+    image_target=board.linux.image_target,
+    image_path=board.linux.image_path,
+    description=board.linux.description,
+    device_tree=board.linux.device_tree,
     toolchain=toolchain,
 )
 
 uboot = project.uboot(
     name="u-boot",
     source="u-boot",
-    configuration="stm32mp15_basic_defconfig",
-    architecture="arm",
-    device_tree="st/stm32mp157c-dk2",
+    config=board.uboot.config,
+    base_configuration=board.uboot.base_configuration,
+    architecture=board.uboot.architecture,
+    device_tree=board.uboot.device_tree,
+    outputs=board.uboot.outputs,
+    description=board.uboot.description,
     toolchain=toolchain,
 )
 

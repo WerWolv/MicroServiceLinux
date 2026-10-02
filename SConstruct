@@ -1,13 +1,30 @@
+from pathlib import Path
+
+from SCons.Errors import UserError
 from SCons.Script import ARGUMENTS, SConscript
 
 from buildsystem import Project
 
 
-project = Project(build_directory=ARGUMENTS.get("BUILD_DIR", ".build"))
+DEFAULT_BOARD = "stm32mp157c-dk2"
+SUPPORTED_BOARDS = (
+    "raspberrypi-4b",
+    "stm32mp157c-dk2",
+)
+
+board_name = ARGUMENTS.get("BOARD", DEFAULT_BOARD)
+if board_name not in SUPPORTED_BOARDS:
+    raise UserError(
+        f"unsupported BOARD={board_name!r}; expected one of: {', '.join(SUPPORTED_BOARDS)}"
+    )
+
+board = SConscript(f"boards/{board_name}/SConscript")
+build_root = Path(ARGUMENTS.get("BUILD_DIR", ".build"))
+project = Project(build_directory=build_root / board.name)
 
 toolchain = SConscript(
     "toolchain/SConscript",
-    exports={"project": project}
+    exports={"project": project, "board": board}
 )
 
 lib = SConscript(
@@ -17,7 +34,7 @@ lib = SConscript(
 
 os = SConscript(
     "os/SConscript",
-    exports={"project": project, "toolchain": toolchain},
+    exports={"project": project, "toolchain": toolchain, "board": board},
 )
 services = SConscript(
     "services/SConscript",
@@ -30,8 +47,15 @@ applications = SConscript(
 
 image = SConscript(
     "image/SConscript",
-    exports={"project": project, "os": os, "services": services, "applications": applications},
+    exports={
+        "project": project,
+        "board": board,
+        "toolchain": toolchain,
+        "os": os,
+        "services": services,
+        "applications": applications,
+    },
 )
-project.compilation_database()
+project.compilation_database(output=str(project.output("compile_commands.json")))
 
 project.default(image)

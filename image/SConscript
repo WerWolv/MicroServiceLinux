@@ -1,65 +1,22 @@
-Import("project", "os", "services")
+from SCons.Script import SConscript
+
+Import("project", "board", "toolchain", "os", "services")
 
 
 initramfs = project.initramfs(
     name="initramfs",
     generator=os.kernel.gen_init_cpio,
+    base="initramfs.base",
+    sysroots=[toolchain],
 )
 
-boot_filesystem = project.action(
-    name="boot-filesystem",
-    outputs=["bootfs.ext4"],
-    inputs=[
-        "create-bootfs.sh",
-        "extlinux.conf",
-        initramfs.nodes[1],
-        os.kernel.image,
-        os.kernel.device_tree,
-    ],
-    command=[
-        "fakeroot",
-        "sh",
-        project.source("create-bootfs.sh"),
-        project.output("bootfs"),
-        project.output("bootfs.ext4"),
-        initramfs.nodes[1],
-        os.kernel.image,
-        os.kernel.device_tree,
-        project.source("extlinux.conf"),
-    ],
-)
-
-images = project.action(
-    name="images",
-    outputs=[
-        "images/u-boot-spl.stm32",
-        "images/u-boot.img",
-        "images/bootfs.ext4",
-        "images/initramfs.cpio",
-        "images/zImage",
-        "images/stm32mp157c-dk2.dtb",
-        "images/sdcard.img",
-    ],
-    inputs=[
-        "create-sdcard.sh",
-        os.bootloader.spl,
-        os.bootloader.image,
-        boot_filesystem.nodes[0],
-        initramfs.nodes[1],
-        os.kernel.image,
-        os.kernel.device_tree,
-    ],
-    command=[
-        "sh",
-        project.source("create-sdcard.sh"),
-        project.output("images"),
-        os.bootloader.spl,
-        os.bootloader.image,
-        boot_filesystem.nodes[0],
-        initramfs.nodes[1],
-        os.kernel.image,
-        os.kernel.device_tree,
-    ],
+images = SConscript(
+    str(board.image_sconscript),
+    exports={
+        "project": project,
+        "os": os,
+        "initramfs": initramfs,
+    },
 )
 
 Return("images")

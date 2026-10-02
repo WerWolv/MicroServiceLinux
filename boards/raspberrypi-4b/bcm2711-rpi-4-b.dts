@@ -1,0 +1,40 @@
+#include <arm/broadcom/bcm2711-rpi-4-b.dts>
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	aliases {
+		epaper0 = &epaper;
+		spi0 = &spi;
+	};
+};
+
+&gpio {
+	gpio-line-names = "ID_SDA", "ID_SCL", "SDA1", "SCL1",
+			  "GPIO_GCLK", "GPIO5", "GPIO6", "SPI_CE1_N",
+			  "epaper-cs", "SPI_MISO", "SPI_MOSI", "SPI_SCLK",
+			  "GPIO12", "GPIO13", "TXD1", "RXD1",
+			  "GPIO16", "epaper-reset", "epaper-power", "GPIO19",
+			  "GPIO20", "GPIO21", "GPIO22", "GPIO23",
+			  "epaper-busy", "epaper-dc", "GPIO26", "GPIO27",
+			  "RGMII_MDIO", "RGMII_MDC", "CTS0", "RTS0",
+			  "TXD0", "RXD0", "SD1_CLK", "SD1_CMD",
+			  "SD1_DATA0", "SD1_DATA1", "SD1_DATA2", "SD1_DATA3",
+			  "PWM0_MISO", "PWM1_MOSI", "STATUS_LED_G_CLK",
+			  "SPIFLASH_CE_N", "SDA0", "SCL0", "RGMII_RXCLK",
+			  "RGMII_RXCTL", "RGMII_RXD0", "RGMII_RXD1", "RGMII_RXD2",
+			  "RGMII_RXD3", "RGMII_TXCLK", "RGMII_TXCTL", "RGMII_TXD0",
+			  "RGMII_TXD1", "RGMII_TXD2", "RGMII_TXD3";
+};
+
+&spi {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_gpio7>;
+	cs-gpios = <&gpio 8 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	epaper: display@0 {
+		compatible = "waveshare,4in0e";
+		reg = <0>;
+		spi-max-frequency = <4000000>;
+	};
+};

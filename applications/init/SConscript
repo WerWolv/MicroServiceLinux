@@ -6,7 +6,6 @@ init = project.executable(
     sources=["init.cpp"],
     toolchain=toolchain,
     compile_options=["-std=c++26", "-O2", "-pipe", "-Wall", "-Wextra"],
-    link_options=["-static"],
     initramfs="/init",
 )
 

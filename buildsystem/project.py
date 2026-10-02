@@ -27,7 +27,7 @@ class Project(ToolchainRules, CcRules, KBuildRules, ImageRules, CompilationDatab
         self.environment["COMPILATIONDB_USE_ABSPATH"] = True
         self.kbuild_lock = self.environment.File(str(self.build_directory / ".kbuild.lock"))
         self.targets = {}
-        SConsignFile(str(self.build_directory / ".sconsign.dblite"))
+        SConsignFile(str(self.build_directory.parent / ".sconsign.dblite"))
 
     def source(self, path):
         path = Path(path)

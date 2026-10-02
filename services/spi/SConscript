@@ -1,0 +1,25 @@
+from types import SimpleNamespace
+
+Import("project", "toolchain", "shared")
+
+
+api = project.interface_library(
+    name="spi-api",
+    headers=["include/spi/spi.hpp"],
+    include_directories=["include"],
+    dependencies=[shared],
+)
+
+server = project.executable(
+    name="spi",
+    sources=["source/spi.cpp"],
+    compile_options=["-std=c++26", "-O2", "-pipe", "-Wall", "-Wextra"],
+    link_options=["-pthread"],
+    dependencies=[api],
+    toolchain=toolchain,
+    initramfs="/services/spi",
+)
+
+spi = SimpleNamespace(api=api, server=server)
+
+Return("spi")

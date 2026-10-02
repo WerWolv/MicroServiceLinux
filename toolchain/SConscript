@@ -1,11 +1,13 @@
-Import("project")
+Import("project", "board")
 
 
 toolchain = project.crosstool_ng(
     name="toolchain",
     source="crosstool-ng",
-    config="toolchain.config",
-    triplet="arm-wolv-linux-gnueabihf",
+    config=board.toolchain.config,
+    triplet=board.toolchain.triplet,
+    description=board.toolchain.description,
+    build_name=board.toolchain.build_name,
 )
 
 Return("toolchain")
