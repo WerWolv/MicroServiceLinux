@@ -9,7 +9,6 @@
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -65,11 +64,7 @@ namespace {
                static_cast<std::uint32_t>(bytes[3]);
     }
 
-    std::optional<std::string> findSpiDevice(
-        const std::filesystem::path &aliasNode,
-        std::uint32_t chipSelect,
-        std::optional<std::string> &expectedDevice
-    ) {
+    std::optional<std::string> findSpiDevice(const std::filesystem::path &aliasNode, std::uint32_t chipSelect, std::optional<std::string> &expectedDevice) {
         constexpr auto SpiDevices = "/sys/bus/spi/devices";
         for (const auto &entry : std::filesystem::directory_iterator(SpiDevices)) {
             const auto deviceName = entry.path().filename().string();
@@ -162,8 +157,7 @@ namespace {
 
 template <>
 struct ipc::Service<wolv::srv::spi::ISpiDevice>::Server : Definition {
-    Server(const std::string &name, wolv::srv::spi::Mode mode,
-           std::uint8_t bitsPerWord, std::uint32_t speedHz)
+    Server(const std::string &name, wolv::srv::spi::Mode mode, std::uint8_t bitsPerWord, std::uint32_t speedHz)
         : descriptor(openSpiDevice(name)) {
         if (mode < wolv::srv::spi::Mode::Mode0 || mode > wolv::srv::spi::Mode::Mode3)
             throw std::invalid_argument("invalid SPI mode");
@@ -220,21 +214,12 @@ struct ipc::Service<wolv::srv::spi::ISpiDevice>::Server : Definition {
 
 template <>
 struct ipc::Service<wolv::srv::spi::Spi>::Server : Definition {
-    wolv::srv::spi::ISpiDevice::Handle openDevice(const std::string &name,
-                                                  wolv::srv::spi::Mode mode,
-                                                  std::uint8_t bitsPerWord,
-                                                  std::uint32_t speedHz) override {
-        auto device = std::make_unique<wolv::srv::spi::ISpiDevice::Server>(
+    wolv::srv::spi::ISpiDevice::Handle openDevice(const std::string &name, wolv::srv::spi::Mode mode, std::uint8_t bitsPerWord, std::uint32_t speedHz) override {
+        auto device = std::make_shared<wolv::srv::spi::ISpiDevice::Server>(
             name, mode, bitsPerWord, speedHz
         );
-        auto client = device->createUnnamed();
-        std::scoped_lock lock(devicesMutex);
-        devices.push_back(std::move(device));
-        return client;
+        return device->createUnnamed();
     }
-
-    std::mutex devicesMutex;
-    std::vector<std::unique_ptr<wolv::srv::spi::ISpiDevice::Server>> devices;
 };
 
 int main() {

@@ -27,10 +27,7 @@ namespace wolv::srv::spi {
         constexpr static auto Identifier = "spi";
 
         [[=ipc::MethodId(1)]]
-        virtual ISpiDevice::Handle openDevice(const std::string &name,
-                                              Mode mode,
-                                              std::uint8_t bitsPerWord,
-                                              std::uint32_t speedHz) = 0;
+        virtual ISpiDevice::Handle openDevice(const std::string &name, Mode mode, std::uint8_t bitsPerWord, std::uint32_t speedHz) = 0;
     };
 
 }

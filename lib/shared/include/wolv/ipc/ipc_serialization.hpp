@@ -61,6 +61,7 @@ namespace ipc {
 
     class MemoryRegion {
     public:
+        MemoryRegion() = default;
         MemoryRegion(FileDescriptor descriptor, std::uint32_t protection,
                      std::uint64_t offset, std::uint64_t size)
             : descriptor(std::move(descriptor)), protection(protection),
@@ -77,18 +78,21 @@ namespace ipc {
         [[nodiscard]] std::uint64_t offset() const { return regionOffset; }
         [[nodiscard]] std::uint64_t size() const { return regionSize; }
         [[nodiscard]] std::span<std::byte> map() const {
-            void *mapping = mmap(nullptr, regionSize, protection, MAP_SHARED,
-                                 descriptor.get(), regionOffset);
-            if (mapping == MAP_FAILED)
-                throw std::system_error(errno, std::generic_category(), "map IPC memory region");
-            return std::span(static_cast<std::byte *>(mapping), regionSize);
+            if (mapping == nullptr) {
+                mapping = mmap(nullptr, regionSize, protection, MAP_SHARED,
+                               descriptor.get(), regionOffset);
+                if (mapping == MAP_FAILED)
+                    throw std::system_error(errno, std::generic_category(), "map IPC memory region");
+            }
+            return { static_cast<std::byte *>(mapping), std::size_t(regionSize) };
         }
 
     private:
         FileDescriptor descriptor;
-        std::uint32_t protection;
-        std::uint64_t regionOffset;
-        std::uint64_t regionSize;
+        std::uint32_t protection = 0;
+        std::uint64_t regionOffset = 0;
+        std::uint64_t regionSize = 0;
+        mutable void *mapping = nullptr;
     };
 
     class SerializerWriter;

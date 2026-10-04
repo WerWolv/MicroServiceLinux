@@ -5,7 +5,6 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -69,8 +68,7 @@ namespace {
         return *match;
     }
 
-    ipc::FileDescriptor requestLine(const std::string &lineName,
-                                    bool output, bool initialValue) {
+    ipc::FileDescriptor requestLine(const std::string &lineName, bool output, bool initialValue) {
         const auto [chipPath, offset] = findLine(lineName);
         ipc::FileDescriptor chip(::open(chipPath.c_str(), O_RDONLY | O_CLOEXEC));
         if (!chip.valid())
@@ -134,27 +132,17 @@ struct ipc::Service<wolv::srv::gpio::IGpioOutput>::Server : Definition {
 template <>
 struct ipc::Service<wolv::srv::gpio::Gpio>::Server : Definition {
     wolv::srv::gpio::IGpioInput::Handle requestInput(const std::string &lineName) override {
-        auto line = std::make_unique<wolv::srv::gpio::IGpioInput::Server>(lineName);
-        auto client = line->createUnnamed();
-        std::scoped_lock lock(linesMutex);
-        inputs.push_back(std::move(line));
-        return client;
+        auto line = std::make_shared<wolv::srv::gpio::IGpioInput::Server>(lineName);
+        return line->createUnnamed();
     }
 
     wolv::srv::gpio::IGpioOutput::Handle requestOutput(const std::string &lineName,
                                                        bool initialValue) override {
-        auto line = std::make_unique<wolv::srv::gpio::IGpioOutput::Server>(
+        auto line = std::make_shared<wolv::srv::gpio::IGpioOutput::Server>(
             lineName, initialValue
         );
-        auto client = line->createUnnamed();
-        std::scoped_lock lock(linesMutex);
-        outputs.push_back(std::move(line));
-        return client;
+        return line->createUnnamed();
     }
-
-    std::mutex linesMutex;
-    std::vector<std::unique_ptr<wolv::srv::gpio::IGpioInput::Server>> inputs;
-    std::vector<std::unique_ptr<wolv::srv::gpio::IGpioOutput::Server>> outputs;
 };
 
 int main() {

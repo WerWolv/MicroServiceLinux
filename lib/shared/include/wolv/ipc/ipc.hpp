@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -67,7 +68,7 @@ namespace ipc {
                 responseMessage.handleCount = send.response_handle_count;
                 responseMessage.regionCount = send.response_region_count;
                 if (send.result != 0)
-                    throw std::runtime_error("IPC service returned error " + std::to_string(send.result));
+                    throw std::runtime_error("IPC service call (" + std::to_string(Id) + ") returned error " + std::to_string(send.result));
 
                 return SyncResponse<Ret>::deserialize(responseMessage);
             }
@@ -130,9 +131,12 @@ namespace ipc {
 
     }
 
+    constexpr static struct EmptyMarker {} Empty;
+
     template<typename T>
     class ServiceHandle : public impl::ClientCreator<T>::Type {
     public:
+        ServiceHandle(EmptyMarker) {}
         ServiceHandle() : ServiceHandle(impl::getNamedService<T>()) {}
 
         explicit ServiceHandle(FileDescriptor descriptor) : descriptor(std::move(descriptor)) {
@@ -171,7 +175,7 @@ namespace ipc {
     struct Service {
         virtual ~Service() = default;
 
-        struct Definition : T {
+        struct Definition : T, std::enable_shared_from_this<Definition> {
             void process(int threadCount) {
                 static_assert(requires { T::Identifier; }, "Missing Service Identifier! Add `constexpr static auto Identifier = \"service_name\";` to your named service definition!");
                 static_assert(!std::string_view(T::Identifier).empty(), "Service Identifier is empty!");
@@ -196,6 +200,7 @@ namespace ipc {
             }
 
             ServiceHandle<T> createUnnamed(int threadCount = 1) {
+                auto lifetime = this->shared_from_this();
                 FileDescriptor control(open(IPC_DEVICE_PATH, O_RDWR | O_CLOEXEC));
                 if (!control.valid())
                     throw std::system_error(errno, std::generic_category(), "open " IPC_DEVICE_PATH);
@@ -206,12 +211,13 @@ namespace ipc {
 
                 FileDescriptor server(creation.server_handle);
                 FileDescriptor client(creation.client_handle);
-                startProcessing(server.release(), threadCount);
+                startProcessing(server.release(), threadCount, std::move(lifetime));
                 return ServiceHandle<T>(std::move(client));
             }
 
         private:
-            void startProcessing(int serverFd, int threadCount) {
+            void startProcessing(int serverFd, int threadCount,
+                                 std::shared_ptr<Definition> lifetime = {}) {
                 FileDescriptor server(serverFd);
                 if (threadCount <= 0)
                     throw std::invalid_argument("IPC server thread count must be positive");
@@ -226,7 +232,7 @@ namespace ipc {
                 }
 
                 for (auto &worker : workers) {
-                    std::thread([this, worker = std::move(worker)]() mutable {
+                    std::thread([this, worker = std::move(worker), lifetime]() mutable {
                         this->processThread(worker.release());
                     }).detach();
                 }
@@ -244,6 +250,7 @@ namespace ipc {
                 call.request_region_capacity = request.regions.size();
 
                 for (;;) {
+                    const bool submittedReply = call.reply_token != 0;
                     call.reply = reinterpret_cast<std::uintptr_t>(response.payload.data());
                     call.reply_handles = reinterpret_cast<std::uintptr_t>(response.handles.data());
                     call.reply_regions = reinterpret_cast<std::uintptr_t>(response.regions.data());
@@ -264,6 +271,9 @@ namespace ipc {
                     }
 
                     response.clear();
+                    if (submittedReply)
+                        continue;
+
                     request.payloadSize = call.request_size;
                     request.handleCount = call.request_handle_count;
                     request.regionCount = call.request_region_count;
@@ -298,7 +308,9 @@ namespace ipc {
                                             response);
                                         call.reply_result = 0;
                                     } catch (const std::exception &e) {
-                                        printf("IPC service method %s threw an exception: %s\n", std::meta::identifier_of(method).data(), e.what());
+                                        int kernelConsole = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+                                        dprintf(kernelConsole, "IPC service method %s threw an exception: %s\n", std::meta::identifier_of(method).data(), e.what());
+                                        close(kernelConsole);
                                         response.clear();
                                         call.reply_result = -EINVAL;
                                     }

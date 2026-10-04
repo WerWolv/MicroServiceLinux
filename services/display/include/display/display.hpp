@@ -12,12 +12,13 @@ namespace wolv::srv::display {
     };
 
     enum class Color : std::uint8_t {
-        Black = 0x0,
-        White = 0x1,
-        Yellow = 0x2,
-        Red = 0x3,
-        Blue = 0x5,
-        Green = 0x6,
+        Black   = 0x00,
+        White   = 0x01,
+        Yellow  = 0x02,
+        Red     = 0x03,
+        Blue    = 0x05,
+        Green   = 0x06,
+        Brown   = 0x07
     };
 
     // Row-major native portrait layout; even x is the high nibble.
@@ -29,6 +30,21 @@ namespace wolv::srv::display {
         PixelFormat format;
     };
 
+    struct [[=ipc::Serializable]] Framebuffer {
+        void setPixel(std::uint32_t x, std::uint32_t y, Color color) {
+            const auto index = y * stride + x / 2;
+            auto &packedPixels = region.map()[index];
+            const auto colorValue = static_cast<std::uint8_t>(color);
+            if (x % 2 == 0)
+                packedPixels = static_cast<std::byte>((std::to_integer<std::uint8_t>(packedPixels) & 0x0F) | (colorValue << 4));
+            else
+                packedPixels = static_cast<std::byte>((std::to_integer<std::uint8_t>(packedPixels) & 0xF0) | colorValue);
+        }
+
+        ipc::MemoryRegion region;
+        std::uint32_t width, height, stride;
+    };
+
     static_assert(sizeof(FramebufferInfo) == 20);
     static_assert(std::is_trivially_copyable_v<FramebufferInfo>);
 
@@ -36,10 +52,10 @@ namespace wolv::srv::display {
         constexpr static auto Identifier = "display";
 
         [[=ipc::MethodId(1)]]
-        virtual FramebufferInfo info() = 0;
+        virtual FramebufferInfo info() const = 0;
 
         [[=ipc::MethodId(2)]]
-        virtual ipc::MemoryRegion framebuffer() = 0;
+        virtual Framebuffer framebuffer() = 0;
 
         [[=ipc::MethodId(3)]]
         virtual void update() = 0;

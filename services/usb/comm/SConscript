@@ -1,0 +1,25 @@
+from types import SimpleNamespace
+
+Import("project", "toolchain", "shared", "fs", "log")
+
+
+api = project.interface_library(
+    name="usb:comm-api",
+    headers=["include/usb/comm.hpp"],
+    include_directories=["include"],
+    dependencies=[shared],
+)
+
+server = project.executable(
+    name="usb:comm",
+    sources=["source/comm.cpp"],
+    compile_options=["-O2", "-pipe", "-Wall", "-Wextra"],
+    link_options=["-pthread"],
+    dependencies=[api, fs, log],
+    toolchain=toolchain,
+    initramfs="/services/usb/comm",
+)
+
+usb_comm = SimpleNamespace(api=api, server=server)
+
+Return("usb_comm")

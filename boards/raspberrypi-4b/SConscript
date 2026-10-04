@@ -28,7 +28,7 @@ board = Board(
         image_target="zImage",
         image_path=Path("arch/arm/boot/zImage"),
         description="Linux for Raspberry Pi 4 Model B",
-        device_tree=directory / "bcm2711-rpi-4-b.dts",
+        device_tree=directory / "devicetree.dts",
     ),
     uboot=UBootConfiguration(
         config=directory / "u-boot.config",

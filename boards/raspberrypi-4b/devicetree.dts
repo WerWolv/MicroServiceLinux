@@ -38,3 +38,12 @@
 		spi-max-frequency = <4000000>;
 	};
 };
+
+&led_act {
+	status = "disabled";
+};
+
+&usb {
+	dr_mode = "peripheral";
+	status = "okay";
+};

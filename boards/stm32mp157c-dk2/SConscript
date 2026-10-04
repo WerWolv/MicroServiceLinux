@@ -27,7 +27,7 @@ board = Board(
         image_target="zImage",
         image_path=Path("arch/arm/boot/zImage"),
         description="Linux for STM32MP157-DK2",
-        device_tree=directory / "stm32mp157c-dk2.dts",
+        device_tree=directory / "devicetree.dts",
     ),
     uboot=UBootConfiguration(
         config=directory / "u-boot.config",

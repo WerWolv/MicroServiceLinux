@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-Import("project", "toolchain", "shared", "logging", "gpio", "spi")
+Import("project", "toolchain", "shared", "log", "gpio", "spi")
 
 
 api = project.interface_library(
@@ -15,7 +15,7 @@ server = project.executable(
     sources=["source/display.cpp"],
     compile_options=["-std=c++26", "-O2", "-pipe", "-Wall", "-Wextra"],
     link_options=["-pthread"],
-    dependencies=[api, logging, gpio, spi],
+    dependencies=[api, log, gpio, spi],
     toolchain=toolchain,
     initramfs="/services/display",
 )

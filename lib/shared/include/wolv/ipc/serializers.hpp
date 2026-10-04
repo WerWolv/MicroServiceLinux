@@ -5,10 +5,11 @@
 namespace ipc {
 
     template<typename T> requires (
-        !std::is_pointer_v<T> &&
+        (!std::is_pointer_v<T> &&
         !std::is_member_pointer_v<T> &&
         std::is_trivially_copyable_v<T> &&
-        std::is_default_constructible_v<T>
+        std::is_default_constructible_v<T>) ||
+        std::is_enum_v<T>
     )
     struct Serializer<T> {
         static void serialize(SerializerWriter &writer, const T &value) {
@@ -20,6 +21,22 @@ namespace ipc {
             const auto bytes = reader.readBytes(sizeof(value));
             std::memcpy(&value, bytes.data(), bytes.size());
             return value;
+        }
+    };
+
+    template<typename T>
+    struct Serializer<std::optional<T>> {
+        static void serialize(SerializerWriter &writer, const std::optional<T> &value) {
+            writer.write(static_cast<std::uint8_t>(value.has_value() ? 1 : 0));
+            if (value.has_value())
+                writer.write(value.value());
+        }
+
+        static std::optional<T> deserialize(SerializerReader &reader) {
+            const auto hasValue = reader.read<std::uint8_t>();
+            if (hasValue)
+                return reader.read<T>();
+            return std::nullopt;
         }
     };
 

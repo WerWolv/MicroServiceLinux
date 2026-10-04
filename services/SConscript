@@ -47,12 +47,23 @@ display = SConscript(
         "project": project,
         "toolchain": toolchain,
         "shared": lib.shared,
-        "logging": log.api,
+        "log": log.api,
         "gpio": gpio.api,
         "spi": spi.api,
     },
 )
 
-services = SimpleNamespace(fs=fs, log=log, gpio=gpio, spi=spi, display=display)
+usb_comm = SConscript(
+    "usb/comm/SConscript",
+    exports={
+        "project": project,
+        "toolchain": toolchain,
+        "shared": lib.shared,
+        "log": log.api,
+        "fs": fs.api
+    },
+)
+
+services = SimpleNamespace(fs=fs, log=log, gpio=gpio, spi=spi, display=display, usb_comm=usb_comm)
 
 Return("services")

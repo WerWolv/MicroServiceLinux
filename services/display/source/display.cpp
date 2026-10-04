@@ -4,6 +4,7 @@
 #include <spi/spi.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -32,6 +33,27 @@ namespace {
     constexpr std::uint32_t FramebufferSize = FramebufferStride * DisplayHeight;
     constexpr std::uint32_t SpiSpeed = 4'000'000;
 
+    enum class Command : std::uint8_t {
+        PanelSetting                  = 0x00,
+        PowerSetting                  = 0x01,
+        PowerOff                      = 0x02,
+        PowerOffSequenceSetting       = 0x03,
+        PowerOn                       = 0x04,
+        BoosterSoftStart1             = 0x05,
+        BoosterSoftStart2             = 0x06,
+        BoosterSoftStart3             = 0x08,
+        DataTransmission              = 0x10,
+        DisplayRefresh                = 0x12,
+        PllControl                    = 0x30,
+        VcomAndDataIntervalSetting    = 0x50,
+        TconSetting                   = 0x60,
+        ResolutionSetting             = 0x61,
+        PartialWindow                 = 0x83,
+        TemperatureVcomDcSetting      = 0x84,
+        CommandHeader                 = 0xAA,
+        PowerSaving                   = 0xE3,
+    };
+
     struct UpdateRegion {
         std::uint32_t x;
         std::uint32_t y;
@@ -43,51 +65,88 @@ namespace {
         }
     };
 
+    enum class RefreshMode {
+        Full,
+        Partial,
+    };
+
+    constexpr std::array<std::uint8_t, 4> encodeResolution(std::uint32_t width, std::uint32_t height) {
+        return {
+            static_cast<std::uint8_t>(width >> 8),
+            static_cast<std::uint8_t>(width),
+            static_cast<std::uint8_t>(height >> 8),
+            static_cast<std::uint8_t>(height),
+        };
+    }
+
+    constexpr std::array<std::uint8_t, 9> encodePartialWindow(const UpdateRegion &region) {
+        const auto xLast = region.x + region.width - 1;
+        const auto yBoundary = region.y + region.height;
+
+        return {
+            static_cast<std::uint8_t>(region.x >> 8),
+            static_cast<std::uint8_t>(region.x),
+            static_cast<std::uint8_t>(xLast >> 8),
+            static_cast<std::uint8_t>(xLast),
+            static_cast<std::uint8_t>(region.y >> 8),
+            static_cast<std::uint8_t>(region.y),
+            static_cast<std::uint8_t>(yBoundary >> 8),
+            static_cast<std::uint8_t>(yBoundary),
+            0x01,
+        };
+    }
+
+    constexpr std::array<std::uint8_t, 1> encodeVcomAndDataInterval(RefreshMode mode) {
+        return { mode == RefreshMode::Full ? std::uint8_t(0x3F) : std::uint8_t(0xFF) };
+    }
+
     [[noreturn]] void throwSystemError(std::string_view operation) {
         throw std::system_error(errno, std::generic_category(), std::string(operation));
     }
 
     class EpaperDisplay {
     public:
-        EpaperDisplay(wolv::srv::gpio::Gpio::Client &gpio,
-                      wolv::srv::spi::Spi::Client &spiService)
+        EpaperDisplay(wolv::srv::gpio::Gpio::Client &gpio, wolv::srv::spi::Spi::Client &spiService)
             : power(gpio.requestOutput("epaper-power", false)),
               reset(gpio.requestOutput("epaper-reset", false)),
               dataCommand(gpio.requestOutput("epaper-dc", false)),
               busy(gpio.requestInput("epaper-busy")),
               spi(spiService.openDevice(
                   "epaper0", wolv::srv::spi::Mode::Mode0, 8, SpiSpeed
-              )) {
+            )
+        ) {
             power.setValue(true);
             std::this_thread::sleep_for(10ms);
             initialize();
         }
 
-        void update(const ipc::MemoryRegion &framebuffer, const UpdateRegion &region) {
+        void update(const wolv::srv::display::Framebuffer &framebuffer, const UpdateRegion &region) {
             if (region.width == 0 || region.height == 0 || region.x >= DisplayWidth ||
                 region.y >= DisplayHeight || region.width > DisplayWidth - region.x ||
                 region.height > DisplayHeight - region.y || region.x % 4 != 0 ||
                 region.width % 4 != 0)
                 throw std::invalid_argument("invalid e-paper update region");
-            if (framebuffer.size() != region.width / 2 * region.height)
+            if (framebuffer.region.size() != region.width / 2 * region.height)
                 throw std::invalid_argument("invalid e-paper framebuffer size");
 
             setUpdateRegion(region);
-            sendCommand(0x10);
-            sendData(framebuffer);
+            sendCommand(Command::DataTransmission);
+            // Two horizontal pixels per byte: the left pixel is in the high nibble.
+            sendData(framebuffer.region);
 
-            sendCommand(0x04);
+            sendCommand(Command::PowerOn);
             waitUntilReady(40s, "power-on");
             std::this_thread::sleep_for(200ms);
-            sendCommand(0x06, { 0x6F, 0x1F, 0x17, 0x27 });
+            sendCommand(Command::BoosterSoftStart2, { 0x6F, 0x1F, 0x17, 0x27 });
             std::this_thread::sleep_for(200ms);
             setUpdateRegion(region);
-            sendCommand(0x50, {
-                static_cast<std::uint8_t>(region.fullScreen() ? 0x3F : 0xFF)
-            });
-            sendCommand(0x12, { 0x00 });
+            sendCommand(
+                Command::VcomAndDataIntervalSetting,
+                encodeVcomAndDataInterval(region.fullScreen() ? RefreshMode::Full : RefreshMode::Partial)
+            );
+            sendCommand(Command::DisplayRefresh, { 0x00 });
             waitUntilReady(40s, "refresh");
-            sendCommand(0x02, { 0x00 });
+            sendCommand(Command::PowerOff, { 0x00 });
             waitUntilReady(40s, "power-off");
         }
 
@@ -102,46 +161,49 @@ namespace {
             waitUntilReady(10s, "reset");
             std::this_thread::sleep_for(30ms);
 
-            sendCommand(0xAA, { 0x49, 0x55, 0x20, 0x08, 0x09, 0x18 });
-            sendCommand(0x01, { 0x3F });
-            sendCommand(0x00, { 0x5F, 0x69 });
-            sendCommand(0x05, { 0x40, 0x1F, 0x1F, 0x2C });
-            sendCommand(0x08, { 0x6F, 0x1F, 0x1F, 0x22 });
-            sendCommand(0x06, { 0x6F, 0x1F, 0x17, 0x17 });
-            sendCommand(0x03, { 0x00, 0x54, 0x00, 0x44 });
-            sendCommand(0x60, { 0x02, 0x00 });
-            sendCommand(0x30, { 0x08 });
-            sendCommand(0x50, { 0x3F });
-            sendCommand(0x61, { 0x01, 0x90, 0x02, 0x58 });
-            sendCommand(0xE3, { 0x2F });
-            sendCommand(0x84, { 0x01 });
+            // The public panel documentation does not expose these payload layouts.
+            sendCommand(Command::CommandHeader, { 0x49, 0x55, 0x20, 0x08, 0x09, 0x18 });
+            sendCommand(Command::PowerSetting, { 0x3F });
+            sendCommand(Command::PanelSetting, { 0x5F, 0x69 });
+            sendCommand(Command::BoosterSoftStart1, { 0x40, 0x1F, 0x1F, 0x2C });
+            sendCommand(Command::BoosterSoftStart3, { 0x6F, 0x1F, 0x1F, 0x22 });
+            sendCommand(Command::BoosterSoftStart2, { 0x6F, 0x1F, 0x17, 0x17 });
+            sendCommand(Command::PowerOffSequenceSetting, { 0x00, 0x54, 0x00, 0x44 });
+            sendCommand(Command::TconSetting, { 0x02, 0x00 });
+            sendCommand(Command::PllControl, { 0x08 });
+            sendCommand(
+                Command::VcomAndDataIntervalSetting,
+                encodeVcomAndDataInterval(RefreshMode::Full)
+            );
+            sendCommand(
+                Command::ResolutionSetting,
+                encodeResolution(DisplayWidth, DisplayHeight)
+            );
+            sendCommand(Command::PowerSaving, { 0x2F });
+            sendCommand(Command::TemperatureVcomDcSetting, { 0x01 });
             waitUntilReady(10s, "initialization");
         }
 
         void setUpdateRegion(const UpdateRegion &region) {
-            const auto xEnd = region.x + region.width - 1;
-            const auto yEnd = region.y + region.height;
-            sendCommand(0x83, {
-                static_cast<std::uint8_t>(region.x >> 8),
-                static_cast<std::uint8_t>(region.x),
-                static_cast<std::uint8_t>(xEnd >> 8),
-                static_cast<std::uint8_t>(xEnd),
-                static_cast<std::uint8_t>(region.y >> 8),
-                static_cast<std::uint8_t>(region.y),
-                static_cast<std::uint8_t>(yEnd >> 8),
-                static_cast<std::uint8_t>(yEnd),
-                0x01,
-            });
+            sendCommand(Command::PartialWindow, encodePartialWindow(region));
         }
 
-        void sendCommand(std::uint8_t command,
-                         std::initializer_list<std::uint8_t> data = {}) {
+        void sendCommand(Command command) {
             dataCommand.setValue(false);
-            writeBytes({ command });
-            if (data.size() != 0) {
-                dataCommand.setValue(true);
-                writeBytes(std::vector<std::uint8_t>(data));
-            }
+            writeBytes({ static_cast<std::uint8_t>(command) });
+        }
+
+        void sendCommand(Command command, std::initializer_list<std::uint8_t> data) {
+            sendCommand(command);
+            dataCommand.setValue(true);
+            writeBytes(data);
+        }
+
+        template <std::size_t Size>
+        void sendCommand(Command command, const std::array<std::uint8_t, Size> &data) {
+            sendCommand(command);
+            dataCommand.setValue(true);
+            writeBytes(std::vector<std::uint8_t>(data.begin(), data.end()));
         }
 
         void sendData(const ipc::MemoryRegion &data) {
@@ -153,8 +215,7 @@ namespace {
             spi.writeBytes(data);
         }
 
-        void waitUntilReady(std::chrono::steady_clock::duration timeout,
-                             std::string_view phase) {
+        void waitUntilReady(std::chrono::steady_clock::duration timeout, std::string_view phase) {
             const auto deadline = std::chrono::steady_clock::now() + timeout;
             while (!busy.getValue()) {
                 if (std::chrono::steady_clock::now() >= deadline)
@@ -183,10 +244,18 @@ namespace {
     }
 
     std::byte *mapFramebuffer(int descriptor) {
-        void *mapping = mmap(nullptr, FramebufferSize, PROT_READ | PROT_WRITE,
-                             MAP_SHARED, descriptor, 0);
+        void *mapping = mmap(
+            nullptr,
+            FramebufferSize,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            descriptor,
+            0x00
+        );
+
         if (mapping == MAP_FAILED)
             throwSystemError("map e-paper framebuffer");
+
         return static_cast<std::byte *>(mapping);
     }
 
@@ -219,7 +288,7 @@ struct ipc::Service<wolv::srv::display::Display>::Server : Definition {
         munmap(framebufferMapping, FramebufferSize);
     }
 
-    wolv::srv::display::FramebufferInfo info() override {
+    wolv::srv::display::FramebufferInfo info() const override {
         return {
             .width = DisplayWidth,
             .height = DisplayHeight,
@@ -229,26 +298,30 @@ struct ipc::Service<wolv::srv::display::Display>::Server : Definition {
         };
     }
 
-    ipc::MemoryRegion framebuffer() override {
+    wolv::srv::display::Framebuffer framebuffer() override {
         return shareFramebuffer(PROT_READ | PROT_WRITE);
     }
 
-    ipc::MemoryRegion shareFramebuffer(std::uint32_t protection) const {
+    wolv::srv::display::Framebuffer shareFramebuffer(std::uint32_t protection) const {
         return shareBuffer(framebufferDescriptor, protection, FramebufferSize);
     }
 
-    ipc::MemoryRegion shareBuffer(const ipc::FileDescriptor &descriptor,
-                                  std::uint32_t protection,
-                                  std::uint32_t size) const {
+    wolv::srv::display::Framebuffer shareBuffer(const ipc::FileDescriptor &descriptor, std::uint32_t protection, std::uint32_t size) const {
         const int duplicate = fcntl(descriptor.get(), F_DUPFD_CLOEXEC, 0);
         if (duplicate < 0)
             throwSystemError("duplicate e-paper framebuffer");
-        return ipc::MemoryRegion(
-            ipc::FileDescriptor(duplicate),
-            protection,
-            0,
-            size
-        );
+        auto fbInfo = info();
+        return wolv::srv::display::Framebuffer{
+            .region = ipc::MemoryRegion(
+                ipc::FileDescriptor(duplicate),
+                protection,
+                0,
+                size
+            ),
+            .width = fbInfo.width,
+            .height = fbInfo.height,
+            .stride = fbInfo.stride,
+        };
     }
 
     void update() override {

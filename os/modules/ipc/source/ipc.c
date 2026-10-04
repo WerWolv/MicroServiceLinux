@@ -70,6 +70,7 @@ struct ipc_service {
 	struct list_head inflight;
 	atomic_t pending_count;
 	wait_queue_head_t waitq;
+	bool anonymous;
 	bool dead;
 };
 
@@ -302,6 +303,7 @@ static struct ipc_service *ipc_alloc_service(const char *name)
 	INIT_LIST_HEAD(&service->inflight);
 	atomic_set(&service->pending_count, 0);
 	init_waitqueue_head(&service->waitq);
+	service->anonymous = !name;
 	return service;
 }
 
@@ -550,6 +552,8 @@ out_put:
 	return ret;
 }
 
+static void ipc_fail_reply(struct ipc_service *service, u64 token, int error);
+
 static int ipc_commit_reply(struct ipc_service *service,
 			     struct ipc_receive_and_reply *call)
 {
@@ -566,8 +570,10 @@ static int ipc_commit_reply(struct ipc_service *service,
 	ret = ipc_capture_message(&response, call->reply, call->reply_size,
 			call->reply_handles, call->reply_handle_count,
 			call->reply_regions, call->reply_region_count);
-	if (ret)
+	if (ret) {
+		ipc_fail_reply(service, call->reply_token, ret);
 		return ret;
+	}
 
 	spin_lock(&service->lock);
 	list_for_each_entry(candidate, &service->inflight, node) {
@@ -611,6 +617,7 @@ static void ipc_fail_delivery(struct ipc_transaction *transaction, int error)
 {
 	struct ipc_service *service = transaction->service;
 	bool complete_transaction = false;
+	bool drop_list_ref = false;
 
 	spin_lock(&service->lock);
 	if (transaction->state == IPC_TXN_DELIVERING ||
@@ -619,15 +626,51 @@ static void ipc_fail_delivery(struct ipc_transaction *transaction, int error)
 		transaction->transport_status = error;
 		transaction->state = IPC_TXN_REPLIED;
 		complete_transaction = true;
+		drop_list_ref = true;
 	} else if (transaction->state == IPC_TXN_DELIVERING_ABANDONED ||
 		   transaction->state == IPC_TXN_ABANDONED) {
 		list_del_init(&transaction->node);
+		drop_list_ref = true;
 	}
 	spin_unlock(&service->lock);
 
 	if (complete_transaction)
 		complete(&transaction->done);
+	if (drop_list_ref)
+		ipc_transaction_put(transaction);
+	/* Drop the reference held while delivering the request. */
 	ipc_transaction_put(transaction);
+}
+
+static void ipc_fail_reply(struct ipc_service *service, u64 token, int error)
+{
+	struct ipc_transaction *transaction = NULL;
+	struct ipc_transaction *candidate;
+	bool complete_transaction = false;
+
+	spin_lock(&service->lock);
+	list_for_each_entry(candidate, &service->inflight, node) {
+		if (candidate->token == token) {
+			transaction = candidate;
+			break;
+		}
+	}
+	if (transaction && transaction->state == IPC_TXN_INFLIGHT) {
+		list_del_init(&transaction->node);
+		transaction->transport_status = error;
+		transaction->state = IPC_TXN_REPLIED;
+		complete_transaction = true;
+	} else if (transaction && transaction->state == IPC_TXN_ABANDONED) {
+		list_del_init(&transaction->node);
+	} else {
+		transaction = NULL;
+	}
+	spin_unlock(&service->lock);
+
+	if (complete_transaction)
+		complete(&transaction->done);
+	if (transaction)
+		ipc_transaction_put(transaction);
 }
 
 static long ipc_receive_and_reply(struct ipc_service *service,
@@ -658,6 +701,8 @@ static long ipc_receive_and_reply(struct ipc_service *service,
 	if (committed_reply && put_user((__u64)0,
 			&((struct ipc_receive_and_reply __user *)arg)->reply_token))
 		return -EFAULT;
+	if (committed_reply)
+		return 0;
 
 	for (;;) {
 		ret = wait_event_interruptible(service->waitq,
@@ -694,6 +739,7 @@ static long ipc_receive_and_reply(struct ipc_service *service,
 			return -EMSGSIZE;
 		}
 
+		refcount_inc(&transaction->refs); /* Delivery ownership. */
 		list_move_tail(&transaction->node, &service->inflight);
 		atomic_dec(&service->pending_count);
 		transaction->state = IPC_TXN_DELIVERING;
@@ -717,6 +763,7 @@ static long ipc_receive_and_reply(struct ipc_service *service,
 		else if (transaction->state == IPC_TXN_DELIVERING_ABANDONED)
 			transaction->state = IPC_TXN_ABANDONED;
 		spin_unlock(&service->lock);
+		ipc_transaction_put(transaction);
 	}
 	return ret;
 }
@@ -793,8 +840,12 @@ static long ipc_client_ioctl(struct file *file, unsigned int command,
 
 static int ipc_client_release(struct inode *inode, struct file *file)
 {
+	struct ipc_service *service = file->private_data;
+
 	(void)inode;
-	ipc_service_put(file->private_data);
+	if (service->anonymous)
+		ipc_shutdown_service(service);
+	ipc_service_put(service);
 	return 0;
 }
 

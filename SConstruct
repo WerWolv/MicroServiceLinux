@@ -56,6 +56,6 @@ image = SConscript(
         "applications": applications,
     },
 )
-project.compilation_database(output=str(project.output("compile_commands.json")))
+project.compilation_database(output="compile_commands.json")
 
 project.default(image)

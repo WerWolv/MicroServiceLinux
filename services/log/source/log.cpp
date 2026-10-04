@@ -1,8 +1,9 @@
 #include <log/log.hpp>
 
-#include <mutex>
 #include <filesystem>
 #include <fcntl.h>
+#include <memory>
+#include <mutex>
 
 template <>
 struct ipc::Service<wolv::srv::log::ILogger>::Server : Definition {
@@ -53,15 +54,9 @@ struct ipc::Service<wolv::srv::log::Logging>::Server : Definition
     }
 
     wolv::srv::log::ILogger::Handle file(const std::string &path) override {
-        auto logger = std::make_unique<wolv::srv::log::ILogger::Server>(path);
-        auto client = logger->createUnnamed();
-        std::scoped_lock lock(loggersMutex);
-        loggers.push_back(std::move(logger));
-        return client;
+        auto logger = std::make_shared<wolv::srv::log::ILogger::Server>(path);
+        return logger->createUnnamed();
     }
-
-    std::mutex loggersMutex;
-    std::vector<std::unique_ptr<wolv::srv::log::ILogger::Server>> loggers;
 };
 
 int main() {

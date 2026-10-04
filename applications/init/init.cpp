@@ -10,28 +10,35 @@
 
 namespace {
 
+    void log(std::string message) {
+        static int kernelConsole = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+        if (kernelConsole >= 0) {
+            dprintf(kernelConsole, "%s\n", message.c_str());
+        }
+    }
+
     void mountFileSystem(const char* source, const char* target, const char* type) {
         if (mount(source, target, type, 0, nullptr) < 0 && errno != EBUSY) {
-            perror(target);
+            log("Failed to mount filesystem: " + std::string(target));
         }
     }
 
     void loadKernelModules() {
-        printf("Loading kernel modules...\n");
+        log("Loading kernel modules...");
         for (const auto &modulePath : std::filesystem::directory_iterator("/modules")) {
             const int module = open(modulePath.path().c_str(), O_RDONLY | O_CLOEXEC);
             if (module < 0) {
+                log("Failed to open kernel module " + modulePath.path().string() + ": " + std::string(strerror(errno)));
                 continue;
             }
             if (syscall(SYS_finit_module, module, "", 0) < 0 && errno != EEXIST) {
-                perror("Failed to load kernel module");
+                log("Failed to load kernel module " + modulePath.path().string() + ": " + std::string(strerror(errno)));
             }
             close(module);
         }
     }
 
     void executeProgram(const std::filesystem::path &programPath) {
-        printf("Executing program: %s\n", programPath.c_str());
         const int service = open(programPath.c_str(), O_RDONLY | O_CLOEXEC);
         if (service < 0) {
             return;
@@ -43,42 +50,37 @@ namespace {
         }
         if (child == 0) {
             execl(programPath.c_str(), programPath.filename().c_str(), nullptr);
-            perror(programPath.c_str());
+            log("Failed to execute program: " + programPath.string());
             std::exit(127);
         }
         close(service);
+
+        log("Started program " + programPath.string() + " with PID " + std::to_string(child));
     }
 
     void loadServices() {
-        printf("Starting services...\n");
-        for (const auto &servicePath : std::filesystem::directory_iterator("/services")) {
-            executeProgram(servicePath);
+        log("Starting services...");
+        for (const auto &service : std::filesystem::recursive_directory_iterator("/services")) {
+            if (service.is_regular_file())
+                executeProgram(service.path());
         }
     }
 
     void loadApplication() {
-        printf("Starting application...\n");
-        for (const auto &servicePath : std::filesystem::directory_iterator("/app")) {
-            executeProgram(servicePath);
+        log("Starting application...");
+        for (const auto &application : std::filesystem::directory_iterator("/app")) {
+            if (application.is_regular_file())
+                executeProgram(application.path());
         }
     }
 
 }
 
 int main() {
-    {
-        int kernelConsole = open("/dev/kmsg", O_RDWR | O_CLOEXEC);
-        dup2(kernelConsole, STDOUT_FILENO);
-        dup2(kernelConsole, STDERR_FILENO);
-        close(kernelConsole);
-
-        std::setvbuf(stdout, nullptr, _IONBF, 0);
-        std::setvbuf(stderr, nullptr, _IONBF, 0);
-    }
-
     mountFileSystem("devtmpfs", "/dev", "devtmpfs");
     mountFileSystem("proc", "/proc", "proc");
     mountFileSystem("sysfs", "/sys", "sysfs");
+    mountFileSystem("configfs", "/sys/kernel/config", "configfs");
 
     loadKernelModules();
     loadServices();
@@ -94,14 +96,14 @@ int main() {
                 pause();
                 continue;
             }
-            perror("waitpid");
+            log("waitpid failed: " + std::string(strerror(errno)));
             continue;
         }
 
         if (WIFEXITED(status)) {
-            fprintf(stderr, "Process %d exited with status %d\n", pid, WEXITSTATUS(status));
+            log("Process " + std::to_string(pid) + " exited with status " + std::to_string(WEXITSTATUS(status)));
         } else if (WIFSIGNALED(status)) {
-            fprintf(stderr, "Process %d terminated by signal %d\n", pid, WTERMSIG(status));
+            log("Process " + std::to_string(pid) + " terminated by signal " + std::to_string(WTERMSIG(status)));
         }
     }
 }

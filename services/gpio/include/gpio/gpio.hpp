@@ -23,8 +23,7 @@ namespace wolv::srv::gpio {
         virtual IGpioInput::Handle requestInput(const std::string &lineName) = 0;
 
         [[=ipc::MethodId(2)]]
-        virtual IGpioOutput::Handle requestOutput(const std::string &lineName,
-                                                  bool initialValue) = 0;
+        virtual IGpioOutput::Handle requestOutput(const std::string &lineName, bool initialValue) = 0;
     };
 
 }
